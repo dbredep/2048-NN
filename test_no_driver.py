@@ -1,9 +1,11 @@
 from random import randint, shuffle, seed
 import sys
-from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
+# from selenium import webdriver
+# from selenium.webdriver.common.keys import Keys
 # from IPython.display import clear_output
-from c2048 import Game, push
+# from c2048 import Game, push
+
+from game2048 import Game, push_all_columns, push_all_rows
 import numpy as np
 import theano
 import theano.tensor as T
@@ -17,6 +19,7 @@ floatX = theano.config.floatX
 #from lasagne.layers.dnn import Conv2DDNNLayer
 from lasagne.layers import Conv2DLayer as ConvLayer
 from lasagne.regularization import regularize_network_params, l1, l2, regularize_layer_params_weighted
+import copy
 
 floatX
 
@@ -69,7 +72,8 @@ def make_input(grid):
     r = np.zeros(shape=(16, 4, 4), dtype=floatX)
     for i in range(4):
         for j in range(4):
-            v = g0[i, j]
+            # v = g0[i, j]
+            v = g0[i][j]
             r[table[v],i, j]=1
     return r
 
@@ -80,17 +84,17 @@ def make_input(grid):
 
 from random import random, randint
 
-def get_grid(driver):
-    grid = np.zeros(shape=(4,4), dtype='uint16')
-    for x in driver.find_elements_by_class_name('tile'):
-        cl = x.get_attribute('class').split()
-        for t in cl:
-            if t.startswith('tile-position-'):
-                pos = int(t[14])-1, int(t[16])-1
-            elif t.startswith('tile-') and t[5].isdigit():
-                v = int(t[5:])
-        grid[pos[1], pos[0]] = v
-    return grid
+# def get_grid(driver):
+#     grid = np.zeros(shape=(4,4), dtype='uint16')
+#     for x in driver.find_elements_by_class_name('tile'):
+#         cl = x.get_attribute('class').split()
+#         for t in cl:
+#             if t.startswith('tile-position-'):
+#                 pos = int(t[14])-1, int(t[16])-1
+#             elif t.startswith('tile-') and t[5].isdigit():
+#                 v = int(t[5:])
+#         grid[pos[1], pos[0]] = v
+#     return grid
 
 # import matplotlib
 # import matplotlib.pyplot as plt
@@ -113,30 +117,31 @@ def Vchange(grid, v):
     ytrain = np.array([v]*8, dtype=floatX)
     train_fn(xtrain, ytrain)
 
-arrow=[Keys.ARROW_LEFT, Keys.ARROW_UP, Keys.ARROW_RIGHT, Keys.ARROW_DOWN]
-def gen_sample_and_learn(driver):
-    body = driver.find_element_by_tag_name('body')
+# arrow=[Keys.ARROW_LEFT, Keys.ARROW_UP, Keys.ARROW_RIGHT, Keys.ARROW_DOWN]
+def gen_sample_and_learn(game, train=True):
+    # body = driver.find_element_by_tag_name('body')
     game_len = 0
     game_score = 0
     last_grid = None
     keep_playing =False
-    while True:
-        try:
-            grid_array = get_grid(driver)
-        except:
-            # grid_array = np.zeros(shape=(4,4), dtype='uint16')
-            return game_len, 0, game_score
+    # while True:
+    while not game.end and game.max() <= 2048:
+            # grid_array = get_grid(driver)
+        grid_array = game.grid
         board_list = []
-        if grid_array is not None:
-            if not keep_playing and grid_array.max()==2048:
-                driver.find_element_by_class_name('keep-playing-button').click()
-                keep_playing = True
-                time.sleep(1)
-            for m in range(4):
-                g = grid_array.copy()
-                s = push(g, m%4)
-                if s >= 0:
-                    board_list.append( (g, m, s) )
+            # if not keep_playing and grid_array.max()==2048:
+                # driver.find_element_by_class_name('keep-playing-button').click()
+                # keep_playing = True
+                # time.sleep(1)
+        for m in range(4):
+            g = copy.deepcopy(grid_array)
+            push_func = push_all_columns if m&1 else push_all_rows
+            moved, s = push_func(g, m<2)
+            # s = push(g, m%4)
+            # if s >= 0:
+            if moved: # if not moved at all, then it stuck and not a valid move
+                board_list.append((g, m, s))
+                # print (g,m,s)
         if board_list:
             boards = np.array([make_input(g) for g,m,s in board_list], dtype=floatX)
             p = P(boards).flatten()        
@@ -150,37 +155,43 @@ def gen_sample_and_learn(driver):
                     best_move = m
                     best_score = 2*s
                     best_grid = boards[i]
-            body.send_keys(arrow[best_move])
+            # body.send_keys(arrow[best_move])
+            game.move(best_move)
+            # print 'move '+str(best_move)
+            # print game.display()
             game_score += best_score
         else:
             best_v = 0
             best_grid = None
         if last_grid is not None:
-            Vchange(last_grid, best_v)       
+            if train==True:
+                Vchange(last_grid, best_v)       
         last_grid = best_grid
         if not board_list:
             break
         # plt.pause(0.05)
-    return game_len, grid_array.max(), game_score
+    return game_len, game.max(), game_score
 
 
 results = []
-driver = webdriver.Firefox()
+# driver = webdriver.Firefox()
 # graph = plt.plot([], [], 'b')[0]
 # dots256 = plt.plot([],[], 'ro')[0]
 # dots512 = plt.plot([],[], 'yo')[0]
 # dots1024 = plt.plot([],[], 'go')[0]
 # plt.xlim((0,100))
 # plt.ylim((0,25000))
-
 for j in range(200):
-    driver.get("https://gabrielecirulli.github.io/2048/")
-    time.sleep(2)
-    result = gen_sample_and_learn(driver)
+    # driver.get("https://gabrielecirulli.github.io/2048/")
+    # time.sleep(2)
+    game = Game()
+    result = gen_sample_and_learn(game, train=True)
     print(j, result)
+    game.display()
 print 'test start'
 for k in range(100):
-    result = gen_sample_and_learn(driver)
+    game = Game()
+    result = gen_sample_and_learn(game, train=False)
     print(k, result)
 
     # print(j, result)
